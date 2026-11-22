@@ -1,0 +1,52 @@
+name: Logz.io release
+
+# Builds the plugin jar from a tag such as 1.0.0-logzio1 and publishes it as a release of this
+# fork, with its sha256. The Ansible role that installs the plugin downloads the jar from there.
+on:
+  push:
+    tags:
+      - "*-logzio*"
+
+# Declare default permissions as read only
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build the jar and publish the release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Java and Maven
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Set the version from the tag
+        run: mvn -B -ntp versions:set -DnewVersion="${GITHUB_REF_NAME}" -DgenerateBackupPoms=false
+
+      - name: Build and test
+        run: mvn -B -ntp verify
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          jar="kafka-quotas-plugin-${GITHUB_REF_NAME}.jar"
+          cd target
+          test -f "${jar}"
+          sha256sum "${jar}" > "${jar}.sha256"
+          cat "${jar}.sha256"
+          gh release create "${GITHUB_REF_NAME}" "${jar}" "${jar}.sha256" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes "Built from ${GITHUB_SHA}: the static produce, fetch and request quotas can be changed at runtime as dynamic broker config. Needs Kafka 4.2.2 or later on 4.2, or 4.3.2 or later."
